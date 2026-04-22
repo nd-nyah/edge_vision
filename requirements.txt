@@ -5,24 +5,15 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 python-multipart==0.0.9
 pydantic==2.8.2
+starlette==0.38.2
 
 # =========================
-# Computer Vision
+# Computer Vision (ONNX)
 # =========================
-opencv-python-headless==4.10.0.84
+opencv-python==4.10.0.84
 Pillow==10.4.0
-numpy>=1.23,<2.0
-
-# =========================
-# YOLOv5 DEPENDENCIES
-# =========================
-# YOLO (modern approach)
-ultralytics
-# torch
-# torchvision
-matplotlib
-pandas
-seaborn
+numpy==1.26.4
+onnxruntime==1.17.3
 
 # =========================
 # Utilities
