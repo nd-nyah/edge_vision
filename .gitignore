@@ -1,8 +1,29 @@
+# Python virtual environments
+venv/
+env/
+.venv/
+onnx_env/
+
+# Python cache
 __pycache__/
 *.pyc
-.env
-.venv/
+*.pyo
+
+# Shared libraries / compiled binaries
+*.so
+*.dll
+*.dylib
+
+# Node.js (if ever used)
 node_modules/
-dist/
-build/
-outputs/
+
+# Environment variables
+.env
+
+# IDE / editor files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
