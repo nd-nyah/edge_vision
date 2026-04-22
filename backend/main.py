@@ -15,7 +15,6 @@ VIDEO_DIR = os.path.join(BASE_DIR, "video")
 
 os.makedirs(VIDEO_DIR, exist_ok=True)
 
-
 # =========================
 # CORS
 # =========================
@@ -27,12 +26,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # =========================
 # ROUTES
 # =========================
 app.include_router(upload_router)
-
 
 # =========================
 # STATIC FILES (VIDEOS)
@@ -43,17 +40,12 @@ app.mount(
     name="videos"
 )
 
-
 # =========================
-# HEALTH CHECK (IMPORTANT)
+# HEALTH CHECK
 # =========================
 @app.get("/")
 def root():
-    return {
-        "status": "ok",
-        "message": "Drone Vision API running 🚀"
-    }
-
+    return {"status": "ok"}
 
 @app.get("/health")
 def health():

@@ -1,35 +1,46 @@
-# Python environments
-venv/
-env/
-.venv/
-onnx_env/
+# =========================
+# Python environment
+# =========================
+edge_venv/
 
+# =========================
 # Python cache
+# =========================
 __pycache__/
 *.pyc
+*.pyo
 
-# Node dependencies
-node_modules/
+# =========================
+# Runtime data (do not version large/generated files)
+# =========================
+backend/video/
 
-# Test / temporary files
+# =========================
+# Local testing / scratch scripts
+# =========================
 testing.py
-requirements_onnx.txt
 
-# OS / IDE
-.DS_Store
+# =========================
+# Frontend (Vite / Node)
+# =========================
+node_modules/
+dist/
+.vite/
+
+# =========================
+# Editor temp files
+# =========================
+*.swp
+*.save
+
+# =========================
+# Environment variables
+# =========================
+.env
+
+# =========================
+# OS / IDE files
+# =========================
 .vscode/
 .idea/
-
-# Build / output
-output/
-dist/
-build/
-
-# Compiled binaries
-*.so
-*.dll
-*.dylib
-
-# Environment files
-.env
-frontend/.env
+.DS_Store

@@ -1,22 +1,29 @@
 import React, { useState } from "react";
+import "./styles/banner.css";
 
-const API = import.meta.env.VITE_API_BASE_URL;
+const API = import.meta.env.VITE_API_URL;
 
 export default function App() {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
+
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
 
   const [uploadedFileName, setUploadedFileName] = useState(null);
 
+  // =========================
+  // DETECTION STATE
+  // =========================
+  const [detecting, setDetecting] = useState(false);
   const [frame, setFrame] = useState(null);
   const [detections, setDetections] = useState([]);
   const [status, setStatus] = useState("idle");
-  const [detecting, setDetecting] = useState(false);
 
-  // 📥 select file
+  // =========================
+  // FILE SELECT
+  // =========================
   const handleFileChange = (e) => {
     const f = e.target.files[0];
 
@@ -29,7 +36,9 @@ export default function App() {
     }
   };
 
-  // 📤 upload
+  // =========================
+  // UPLOAD
+  // =========================
   const handleUpload = async () => {
     if (!file) return;
 
@@ -46,26 +55,24 @@ export default function App() {
         body: formData,
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      const data = JSON.parse(text);
 
-      if (!res.ok) {
-        throw new Error(data.detail || "Upload failed");
-      }
+      if (!res.ok) throw new Error(data.detail || "Upload failed");
 
-      // ✅ FIX: use backend filename
       setUploadedFileName(data.filename);
-
       setSuccess(true);
 
     } catch (err) {
-      console.error(err);
-      setError(err.message || "Upload failed");
+      setError(err.message);
     } finally {
       setUploading(false);
     }
   };
 
-  // 🗑 delete video
+  // =========================
+  // DELETE
+  // =========================
   const handleDelete = async () => {
     if (!uploadedFileName) return;
 
@@ -75,13 +82,8 @@ export default function App() {
         { method: "DELETE" }
       );
 
-      const data = await res.json();
+      if (!res.ok) throw new Error("Delete failed");
 
-      if (!res.ok) {
-        throw new Error(data.message || "Delete failed");
-      }
-
-      // FULL RESET
       setFile(null);
       setPreview(null);
       setUploadedFileName(null);
@@ -90,41 +92,79 @@ export default function App() {
 
       document.querySelector("input[type='file']").value = "";
 
-      alert("Video deleted successfully 🗑");
+      alert("Video deleted 🗑");
 
     } catch (err) {
-      console.error(err);
-      alert("Delete failed ❌");
+      alert(err.message);
     }
   };
 
-  // 🧠 detection controls
+  // =========================
+  // DETECTION START
+  // =========================
   const startDetect = async () => {
-    await fetch(`${API}/start-detect`, { method: "POST" });
-    setDetecting(true);
+    try {
+      setStatus("starting...");
+
+      const res = await fetch(`${API}/start-detect`, {
+        method: "POST",
+      });
+
+      const text = await res.text();
+      const data = JSON.parse(text || "{}");
+
+      if (!res.ok) throw new Error(data.detail || "Start detect failed");
+
+      setDetecting(true);
+      setStatus("running");
+
+    } catch (err) {
+      setStatus("error");
+      console.error(err);
+    }
   };
 
+  // =========================
+  // DETECTION STOP
+  // =========================
   const stopDetect = async () => {
-    await fetch(`${API}/stop-detect`, { method: "POST" });
-    setDetecting(false);
+    try {
+      await fetch(`${API}/stop-detect`, {
+        method: "POST",
+      });
+
+      setDetecting(false);
+      setStatus("stopped");
+
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   return (
     <div style={{ maxWidth: 800, margin: "auto", padding: 20 }}>
-      <h2>🎥 Video Upload UI</h2>
+       {/* =========================
+          🔥 ROLLING BANNER
+      ========================= */}
+      <div className="banner">
+        <div className="banner-text">
+          Altitude - Drone Vision 🚁
+          <span> • </span>
+          Altitude - Drone Vision 🚁
+        </div>
+      </div>
 
-      {/* INPUT */}
+      <h2>🎥 Video Upload + Detection</h2>
+
+      {/* UPLOAD */}
       <input type="file" accept="video/*" onChange={handleFileChange} />
 
-      {/* PREVIEW */}
       {preview && (
         <div style={{ marginTop: 20 }}>
-          <h4>Preview</h4>
           <video width="100%" controls src={preview} />
         </div>
       )}
 
-      {/* UPLOAD */}
       <button
         onClick={handleUpload}
         disabled={!file || uploading}
@@ -133,10 +173,8 @@ export default function App() {
         {uploading ? "Uploading..." : "Upload Video"}
       </button>
 
-      {/* ERROR */}
       {error && <p style={{ color: "red" }}>❌ {error}</p>}
 
-      {/* SUCCESS */}
       {success && (
         <div style={{ marginTop: 20 }}>
           <p style={{ color: "green" }}>✅ Upload successful</p>
@@ -145,9 +183,9 @@ export default function App() {
             onClick={handleDelete}
             style={{
               marginTop: 10,
-              padding: "8px 12px",
               background: "red",
               color: "white",
+              padding: "8px 12px",
               border: "none",
               cursor: "pointer",
             }}
@@ -157,10 +195,12 @@ export default function App() {
         </div>
       )}
 
-      {/* DETECTOR */}
+      {/* =========================
+          DETECTION SECTION
+      ========================= */}
       <hr style={{ margin: "40px 0" }} />
 
-      <h2>🧠 Object Detection</h2>
+      <h2>🧠 Detection</h2>
 
       {!detecting ? (
         <button onClick={startDetect}>▶ Start Detection</button>

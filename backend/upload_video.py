@@ -1,16 +1,17 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
 import os
 import shutil
 import uuid
+from fastapi import APIRouter, UploadFile, File, HTTPException
 
 router = APIRouter()
 
-# ✅ absolute stable folder (no cwd issues)
+# =========================
+# FIXED VIDEO FOLDER
+# =========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIDEO_DIR = os.path.join(BASE_DIR, "video")
 
 os.makedirs(VIDEO_DIR, exist_ok=True)
-
 
 # =========================
 # UPLOAD VIDEO
@@ -23,7 +24,6 @@ async def upload_video(file: UploadFile = File(...)):
 
     print("🔥 REQUEST HIT:", file.filename)
 
-    # ✅ prevent overwrite (IMPORTANT FIX)
     safe_name = f"{uuid.uuid4().hex}_{file.filename}"
     file_path = os.path.join(VIDEO_DIR, safe_name)
 
@@ -34,11 +34,8 @@ async def upload_video(file: UploadFile = File(...)):
 
     return {
         "status": "success",
-        "filename": safe_name,
-        "original_filename": file.filename,
-        "path": file_path
+        "filename": safe_name
     }
-
 
 # =========================
 # DELETE VIDEO
@@ -55,7 +52,4 @@ async def delete_video(filename: str):
 
     print("🗑 DELETED:", file_path)
 
-    return {
-        "status": "success",
-        "message": f"{filename} deleted"
-    }
+    return {"status": "success"}
