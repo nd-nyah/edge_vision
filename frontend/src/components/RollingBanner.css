@@ -1,0 +1,22 @@
+.rb-wrapper {
+  width: 100%;
+  overflow: hidden;
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+  color: #38bdf8;
+  padding: 8px 0;
+}
+
+.rb-track {
+  display: flex;
+  gap: 60px;
+  white-space: nowrap;
+  animation: rb-scroll 10s linear infinite;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+@keyframes rb-scroll {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}

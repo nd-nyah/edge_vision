@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Drone Vision System</title>
+
+    <!-- Optional styling -->
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background-color: #0f172a;
+        color: white;
+      }
+
+      #root {
+        min-height: 100vh;
+      }
+      /* 🚁 Rolling banner animation */
+      @keyframes scrollText {
+      0% {
+        transform: translateX(0%);
+      }
+      100% {
+        transform: translateX(-100%);
+      }
+    }
+
+    </style>
+  </head>
+
+  <body>
+    <!-- ROOT DIV (React mounts here) -->
+    <div id="root"></div>
+
+    <!-- React entry point -->
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
