@@ -1,4 +1,4 @@
-# Python virtual environments
+# Python environments
 venv/
 env/
 .venv/
@@ -7,23 +7,28 @@ onnx_env/
 # Python cache
 __pycache__/
 *.pyc
-*.pyo
 
-# Shared libraries / compiled binaries
+# Node dependencies
+node_modules/
+
+# Test / temporary files
+testing.py
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Build / output
+output/
+dist/
+build/
+
+# Compiled binaries
 *.so
 *.dll
 *.dylib
 
-# Node.js (if ever used)
-node_modules/
-
-# Environment variables
+# Environment files
 .env
-
-# IDE / editor files
-.vscode/
-.idea/
-
-# OS files
-.DS_Store
-Thumbs.db
+frontend/.env
