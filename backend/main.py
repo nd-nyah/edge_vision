@@ -4,11 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from upload_video import router as upload_router
+from video_stream import router as video_router
 
 app = FastAPI()
 
 # =========================
-# BASE PATH (SAFE)
+# BASE PATH
 # =========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIDEO_DIR = os.path.join(BASE_DIR, "video")
@@ -29,10 +30,11 @@ app.add_middleware(
 # =========================
 # ROUTES
 # =========================
-app.include_router(upload_router)
+app.include_router(upload_router, prefix="/api")
+app.include_router(video_router, prefix="/api")
 
 # =========================
-# STATIC FILES (VIDEOS)
+# STATIC FILES (optional)
 # =========================
 app.mount(
     "/videos",
@@ -41,11 +43,14 @@ app.mount(
 )
 
 # =========================
-# HEALTH CHECK
+# ROOT
 # =========================
 @app.get("/")
 def root():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "message": "YOLO Video Stream API running"
+    }
 
 @app.get("/health")
 def health():

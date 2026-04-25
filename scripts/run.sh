@@ -10,28 +10,28 @@ PORT=8001
 echo "👉 Starting backend on port $PORT"
 
 # -----------------------------
-# Check if port is in use
+# HARD CLEAN (IMPORTANT FIX)
 # -----------------------------
-if lsof -i :$PORT >/dev/null; then
-    echo "⚠️ Port $PORT is in use. Checking if it's uvicorn..."
+echo "🧹 Killing anything using port $PORT..."
 
-    PID=$(lsof -t -i :$PORT)
+# kill all processes on port
+PIDS=$(lsof -t -i :$PORT || true)
 
-    if ps -p $PID -o cmd= | grep -q "uvicorn"; then
-        echo "🧹 Killing uvicorn process (PID $PID)..."
-        kill -9 $PID
-    else
-        echo "❌ Port $PORT is used by another process (not uvicorn). Not killing it."
-        exit 1
-    fi
+if [ ! -z "$PIDS" ]; then
+    echo "Found PIDs: $PIDS"
+    kill -9 $PIDS || true
 fi
 
+# also kill uvicorn explicitly (extra safety)
+pkill -f uvicorn || true
+
+sleep 1
+
 # -----------------------------
-# Run server
+# Run server (NO reload = stable)
 # -----------------------------
 cd "$APP_DIR"
 
 exec "$VENV_PY" -m uvicorn main:app \
-    --reload \
     --host 0.0.0.0 \
     --port $PORT
