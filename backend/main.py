@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 
 from upload_video import router as upload_router
 from video_stream import router as video_router
+# from prompt_stream import router as prompt_router
 
 app = FastAPI()
 
@@ -32,6 +33,7 @@ app.add_middleware(
 # =========================
 app.include_router(upload_router, prefix="/api")
 app.include_router(video_router, prefix="/api")
+# app.include_router(prompt_router)
 
 # =========================
 # STATIC FILES (optional)

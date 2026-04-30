@@ -1,3 +1,4 @@
+import "./styles/banner.css";
 import React, { useState, useRef } from "react";
 
 const API = import.meta.env.VITE_API_URL;
@@ -121,7 +122,17 @@ export default function App() {
 
   return (
     <div style={{ maxWidth: 800, margin: "auto", padding: 20 }}>
-
+      {/* =========================
+          🔥 ROLLING BANNER
+      ========================= */}
+      <div className="banner">
+        <div className="banner-text">
+          Altitude - Drone Vision 🚁
+          <span> • </span>
+          Altitude - Drone Vision 🚁
+        </div>
+      </div>
+      
       <h2>🎥 Upload</h2>
 
       <input type="file" accept="video/*" onChange={handleFileChange} />

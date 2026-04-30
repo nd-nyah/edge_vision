@@ -12,7 +12,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIDEO_DIR = os.path.join(BASE_DIR, "video")
 MODEL_PATH = os.path.join(BASE_DIR, "models", "yolov5s.onnx")
 
-detector = Detector(MODEL_PATH)
+detector = Detector(MODEL_PATH) 
 
 BATCH_SIZE = 4  # optional, keep small for responsiveness
 
@@ -23,7 +23,6 @@ def get_video():
         raise HTTPException(status_code=404, detail="No video found")
 
     return os.path.join(VIDEO_DIR, files[0])
-
 
 def generate_frames():
     print("🔥 STREAM STARTED")
