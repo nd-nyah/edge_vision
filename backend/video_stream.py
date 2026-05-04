@@ -2,43 +2,67 @@ import os
 import cv2
 import json
 import base64
+import time
+from collections import deque
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+
 from detector import Detector
 
 router = APIRouter()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIDEO_DIR = os.path.join(BASE_DIR, "video")
-MODEL_PATH = os.path.join(BASE_DIR, "models", "yolov5s.onnx")
 
-detector = Detector(MODEL_PATH) 
+YOLOV5_MODEL = os.path.join(BASE_DIR, "models", "yolov5s.onnx")
+YOLO_WORLD_MODEL = os.path.join(BASE_DIR, "models", "yolov8s-world.pt")
 
-BATCH_SIZE = 4  # optional, keep small for responsiveness
+detector = Detector(
+    YOLOV5_MODEL,
+    YOLO_WORLD_MODEL
+)
 
+BATCH_SIZE = 4
+JPEG_QUALITY = 70
+TIME_WINDOW = 0.5
+
+object_memory = deque(maxlen=300)
 
 def get_video():
-    files = [f for f in os.listdir(VIDEO_DIR) if f.endswith(".mp4")]
+    files = sorted(f for f in os.listdir(VIDEO_DIR) if f.endswith(".mp4"))
     if not files:
         raise HTTPException(status_code=404, detail="No video found")
-
     return os.path.join(VIDEO_DIR, files[0])
 
-def generate_frames():
-    print("🔥 STREAM STARTED")
+@router.post("/set-prompts")
+def set_prompts(data: dict):
+    prompts = data.get("prompts", [])
 
+    if isinstance(prompts, str):
+        prompts = [p.strip() for p in prompts.split(",")]
+
+    detector.set_prompts(prompts)
+
+    return {
+        "status": "ok",
+        "prompts": prompts
+    }
+
+def make_id(d):
+    x = int(d["bbox"]["x"] // 30)
+    y = int(d["bbox"]["y"] // 30)
+    return f"{d['label']}_{x}_{y}"
+
+def generate_frames():
     video_path = get_video()
     cap = cv2.VideoCapture(video_path)
 
-    if not cap.isOpened():
-        raise RuntimeError("Failed to open video")
-
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    print(f"🎞 TOTAL FRAMES: {total_frames}")
-
     frame_idx = 0
 
-    batch = []
+    buffer_frames = []
+    raw_frames = []
 
     while True:
         ret, frame = cap.read()
@@ -46,48 +70,61 @@ def generate_frames():
             break
 
         frame_idx += 1
-        batch.append(frame)
+        now = time.time()
 
-        # =========================
-        # PROCESS IMMEDIATELY (OR BATCH)
-        # =========================
-        detections, drawn = detector.detect(frame)
+        buffer_frames.append(frame)
+        raw_frames.append(frame)
 
-        # encode frame
-        success, buffer = cv2.imencode(".jpg", drawn)
-        if not success:
+        if len(buffer_frames) < BATCH_SIZE:
             continue
 
-        b64 = base64.b64encode(buffer.tobytes()).decode("utf-8")
+        for f in raw_frames:
 
-        # =========================
-        # REAL PROGRESS (KEY FIX)
-        # =========================
-        progress = round((frame_idx / total_frames) * 100, 2)
+            detections, _ = detector.detect(f)
 
-        # =========================
-        # STREAM FRAME IMMEDIATELY
-        # =========================
-        yield json.dumps({
-            "image": b64,
-            "detections": detections,
-            "progress": progress
-        }) + "\n"
+            for d in detections:
+                object_memory.append({
+                    "id": make_id(d),
+                    "data": d,
+                    "time": now
+                })
 
-        print(f"📦 FRAME {frame_idx}/{total_frames} | {progress}%")
+            visible_objects = [
+                x["data"]
+                for x in object_memory
+                if now - x["time"] < TIME_WINDOW
+            ]
+
+            drawn = detector.draw(f.copy(), visible_objects)
+
+            success, buffer = cv2.imencode(
+                ".jpg",
+                drawn,
+                [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
+            )
+
+            if not success:
+                continue
+
+            b64 = base64.b64encode(buffer.tobytes()).decode("utf-8")
+
+            progress = round((frame_idx / total_frames) * 100, 2)
+
+            yield json.dumps({
+                "image": b64,
+                "detections": visible_objects,
+                "progress": progress
+            }) + "\n"
+
+        buffer_frames = []
+        raw_frames = []
 
     cap.release()
 
-    # =========================
-    # FINAL SIGNAL
-    # =========================
     yield json.dumps({
-        "status": "detection_completed",
-        "progress": 100.0
+        "status": "done",
+        "progress": 100
     }) + "\n"
-
-    print("✅ DETECTION COMPLETED")
-
 
 @router.get("/video")
 def stream_video():
@@ -100,3 +137,4 @@ def stream_video():
             "X-Accel-Buffering": "no",
         }
     )
+

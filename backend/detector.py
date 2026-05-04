@@ -1,20 +1,24 @@
 import cv2
 import numpy as np
 import onnxruntime as ort
+from ultralytics import YOLO
 
 
 class Detector:
-    def __init__(self, model_path):
-        # print("🔥 Detector initialized")
+    def __init__(self, yolov5_path, yoloworld_path):
+
+        self.conf_threshold = 0.25
+        self.text_prompts = []
+
+        # =========================
+        # YOLOv5 (ONNX)
+        # =========================
         self.session = ort.InferenceSession(
-            model_path,
+            yolov5_path,
             providers=["CPUExecutionProvider"]
         )
-
         self.input_name = self.session.get_inputs()[0].name
-        self.conf_threshold = 0.45
 
-        # COCO classes
         self.names = [
             "person","bicycle","car","motorcycle","airplane","bus","train","truck","boat",
             "traffic light","fire hydrant","stop sign","parking meter","bench","bird","cat",
@@ -28,23 +32,45 @@ class Detector:
             "toothbrush"
         ]
 
+        # =========================
+        # YOLO-World
+        # =========================
+        self.world_model = YOLO(yoloworld_path)
+
     # =========================
-    # PREPROCESS
+    # PROMPTS
+    # =========================
+    def set_prompts(self, prompts):
+        self.text_prompts = prompts or []
+
+    # =========================
+    # PREPROCESS YOLOv5
     # =========================
     def preprocess(self, frame):
         img = cv2.resize(frame, (640, 640))
-        img = img[:, :, ::-1]  # BGR → RGB
-        img = img.transpose(2, 0, 1)  # HWC → CHW
+        img = img[:, :, ::-1]
+        img = img.transpose(2, 0, 1)
         img = np.expand_dims(img, axis=0)
-        img = img.astype(np.float32) / 255.0
-        return img
+        return img.astype(np.float32) / 255.0
 
     # =========================
-    # PREDICT
+    # AUTO SWITCH PREDICT
     # =========================
     def predict(self, frame):
         if frame is None:
             return []
+
+        # 🔥 AUTO SWITCH LOGIC
+        if self.text_prompts:
+            return self._predict_yoloworld(frame)
+        else:
+            return self._predict_yolov5(frame)
+
+    # =========================
+    # YOLOv5
+    # =========================
+    def _predict_yolov5(self, frame):
+        h0, w0 = frame.shape[:2]
 
         input_tensor = self.preprocess(frame)
         outputs = self.session.run(None, {self.input_name: input_tensor})
@@ -57,72 +83,99 @@ class Detector:
                 continue
 
             obj_conf = det[4]
-
             if obj_conf < self.conf_threshold:
                 continue
 
-            class_scores = det[5:]
-            cls = np.argmax(class_scores)
-            cls_conf = class_scores[cls]
-
-            score = obj_conf * cls_conf
+            cls_scores = det[5:]
+            cls = int(np.argmax(cls_scores))
+            score = obj_conf * cls_scores[cls]
 
             if score < self.conf_threshold:
                 continue
 
             cx, cy, w, h = det[:4]
 
-            x1 = cx - w / 2
-            y1 = cy - h / 2
+            x_scale = w0 / 640
+            y_scale = h0 / 640
+
+            x1 = (cx - w / 2) * x_scale
+            y1 = (cy - h / 2) * y_scale
 
             detections.append({
-                "label": self.names[int(cls)],
+                "label": self.names[cls],
                 "confidence": float(score),
                 "bbox": {
                     "x": float(x1),
                     "y": float(y1),
-                    "w": float(w),
-                    "h": float(h)
+                    "w": float(w * x_scale),
+                    "h": float(h * y_scale)
                 }
             })
 
         return detections
 
     # =========================
-    # DRAW BOXES
+    # YOLO-WORLD
+    # =========================
+    def _predict_yoloworld(self, frame):
+
+        if self.text_prompts:
+            try:
+                self.world_model.set_classes(self.text_prompts)
+            except Exception:
+                pass
+
+        results = self.world_model.predict(
+            source=frame,
+            conf=self.conf_threshold,
+            verbose=False
+        )
+
+        detections = []
+
+        for r in results:
+            if r.boxes is None:
+                continue
+
+            for box in r.boxes:
+                x1, y1, x2, y2 = box.xyxy[0].tolist()
+                conf = float(box.conf[0])
+                cls_id = int(box.cls[0])
+
+                label = (
+                    self.text_prompts[cls_id]
+                    if self.text_prompts and cls_id < len(self.text_prompts)
+                    else "object"
+                )
+
+                detections.append({
+                    "label": label,
+                    "confidence": conf,
+                    "bbox": {
+                        "x": x1,
+                        "y": y1,
+                        "w": x2 - x1,
+                        "h": y2 - y1
+                    }
+                })
+
+        return detections
+
+    # =========================
+    # DRAW
     # =========================
     def draw(self, frame, detections):
-        h, w, _ = frame.shape
+        for d in detections:
+            x = int(d["bbox"]["x"])
+            y = int(d["bbox"]["y"])
+            w = int(d["bbox"]["w"])
+            h = int(d["bbox"]["h"])
 
-        for det in detections:
-            x = det["bbox"]["x"]
-            y = det["bbox"]["y"]
-            bw = det["bbox"]["w"]
-            bh = det["bbox"]["h"]
-
-            label = det["label"]
-            conf = det["confidence"]
-
-            # scale to original frame
-            x = int(x * w / 640)
-            y = int(y * h / 640)
-            bw = int(bw * w / 640)
-            bh = int(bh * h / 640)
-
-            # clamp
-            x = max(0, x)
-            y = max(0, y)
-            bw = max(0, bw)
-            bh = max(0, bh)
-
-            x2 = min(w, x + bw)
-            y2 = min(h, y + bh)
-
-            cv2.rectangle(frame, (x, y), (x2, y2), (0, 255, 0), 2)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
             cv2.putText(
                 frame,
-                f"{label} {conf:.2f}",
+                f"{d['label']} {d['confidence']:.2f}",
                 (x, max(20, y - 10)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
@@ -132,10 +185,7 @@ class Detector:
 
         return frame
 
-    # =========================
-    # PIPELINE
-    # =========================
     def detect(self, frame):
         detections = self.predict(frame)
-        drawn_frame = self.draw(frame.copy(), detections)
-        return detections, drawn_frame
+        drawn = self.draw(frame.copy(), detections)
+        return detections, drawn

@@ -1,5 +1,5 @@
 import "./styles/banner.css";
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 
 const API = import.meta.env.VITE_API_URL;
 
@@ -15,11 +15,15 @@ export default function App() {
   const [detections, setDetections] = useState([]);
   const [status, setStatus] = useState("idle");
 
-  // ✅ ADDED: progress state
   const [progress, setProgress] = useState(0);
+
+  const [prompt, setPrompt] = useState("person, car");
 
   const readerRef = useRef(null);
 
+  // =========================
+  // FILE HANDLING
+  // =========================
   const handleFileChange = (e) => {
     const f = e.target.files[0];
     if (!f) return;
@@ -33,6 +37,9 @@ export default function App() {
     setStatus("idle");
   };
 
+  // =========================
+  // UPLOAD VIDEO
+  // =========================
   const handleUpload = async () => {
     if (!file) return;
 
@@ -49,7 +56,6 @@ export default function App() {
       });
 
       const data = await res.json();
-
       if (!res.ok) throw new Error(data.detail || "Upload failed");
 
       setSuccess(true);
@@ -60,11 +66,36 @@ export default function App() {
     }
   };
 
+  // =========================
+  // START STREAM
+  // =========================
   const startStream = async () => {
     setStatus("running");
     setProgress(0);
 
+    const cleanedPrompts = prompt
+      .split(",")
+      .map(p => p.trim().toLowerCase())
+      .filter(Boolean);
+
+    // 🔥 send prompts (this triggers YOLO-World automatically in backend)
+    try {
+      await fetch(`${API}/api/set-prompts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompts: cleanedPrompts }),
+      });
+    } catch (err) {
+      console.error("Prompt error:", err);
+    }
+
     const res = await fetch(`${API}/api/video`);
+
+    if (!res.ok || !res.body) {
+      setStatus("error");
+      return;
+    }
+
     const reader = res.body.getReader();
     readerRef.current = reader;
 
@@ -83,36 +114,30 @@ export default function App() {
       for (const part of parts) {
         if (!part.trim()) continue;
 
-        const data = JSON.parse(part);
-
-        // =========================
-        // FRAME UPDATE
-        // =========================
-        if (data.image) setFrame(data.image);
-
-        if (data.detections) setDetections(data.detections);
-
-        // =========================
-        // PROGRESS UPDATE
-        // =========================
-        if (data.progress !== undefined) {
-          setProgress(data.progress);
+        // 🔥 safe JSON parsing
+        let data;
+        try {
+          data = JSON.parse(part);
+        } catch {
+          continue;
         }
 
-        // =========================
-        // END SIGNAL
-        // =========================
-        if (data.status === "detection_completed") {
+        if (data.image) setFrame(data.image);
+        if (Array.isArray(data.detections)) setDetections(data.detections);
+        if (data.progress !== undefined) setProgress(data.progress);
+
+        if (data.status === "done") {
           setStatus("done");
           setProgress(100);
-          setFrame(null);
-          setDetections([]);
           return;
         }
       }
     }
   };
 
+  // =========================
+  // STOP STREAM
+  // =========================
   const stopStream = async () => {
     setStatus("stopped");
     if (readerRef.current) {
@@ -120,26 +145,32 @@ export default function App() {
     }
   };
 
+  // =========================
+  // CLEANUP
+  // =========================
+  useEffect(() => {
+    return () => {
+      if (preview) URL.revokeObjectURL(preview);
+    };
+  }, [preview]);
+
+  // =========================
+  // UI
+  // =========================
   return (
     <div style={{ maxWidth: 800, margin: "auto", padding: 20 }}>
-      {/* =========================
-          🔥 ROLLING BANNER
-      ========================= */}
+
       <div className="banner">
         <div className="banner-text">
-          Altitude - Drone Vision 🚁
-          <span> • </span>
-          Altitude - Drone Vision 🚁
+          Altitude - Drone Vision 🚁 • Altitude - Drone Vision 🚁
         </div>
       </div>
-      
+
       <h2>🎥 Upload</h2>
 
       <input type="file" accept="video/*" onChange={handleFileChange} />
 
-      {preview && (
-        <video width="100%" controls src={preview} />
-      )}
+      {preview && <video width="100%" controls src={preview} />}
 
       <button onClick={handleUpload} disabled={uploading}>
         {uploading ? "Uploading..." : "Upload"}
@@ -150,6 +181,24 @@ export default function App() {
 
       <hr />
 
+      <h2>🔎 Prompt (auto switches YOLO → YOLO-World)</h2>
+
+      <input
+        type="text"
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        placeholder="e.g. person, car"
+        style={{
+          width: "100%",
+          padding: 10,
+          borderRadius: 6,
+          border: "1px solid #ccc",
+          marginBottom: 10,
+        }}
+      />
+
+      <hr />
+
       <h2>🧠 Detection</h2>
 
       <button onClick={startStream}>▶ Start Stream</button>
@@ -157,7 +206,6 @@ export default function App() {
 
       <p>Status: {status}</p>
 
-      {/* ✅ PROGRESS UI */}
       <p>
         Progress: [
         <span style={{ color: "green" }}>
@@ -176,7 +224,7 @@ export default function App() {
             height: 8,
             background: "green",
             borderRadius: 5,
-            transition: "width 0.2s"
+            transition: "width 0.2s",
           }}
         />
       </div>
@@ -190,7 +238,7 @@ export default function App() {
         <p>No stream yet</p>
       )}
 
-      {detections.length > 0 && (
+      {detections.length > 0 ? (
         <ul>
           {detections.map((d, i) => (
             <li key={i}>
@@ -198,6 +246,8 @@ export default function App() {
             </li>
           ))}
         </ul>
+      ) : (
+        <p style={{ opacity: 0.6 }}>No matching objects detected</p>
       )}
     </div>
   );

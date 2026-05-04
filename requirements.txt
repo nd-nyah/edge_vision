@@ -8,12 +8,17 @@ pydantic==2.8.2
 starlette==0.38.2
 
 # =========================
-# Computer Vision (ONNX)
+# Computer Vision (YOLO + ONNX)
 # =========================
 opencv-python==4.10.0.84
 Pillow==10.4.0
 numpy>=1.23,<2.0
 onnxruntime==1.17.3
+
+# =========================
+# YOLO-World / Ultralytics
+# =========================
+ultralytics>=8.2.0
 
 # =========================
 # Utilities
