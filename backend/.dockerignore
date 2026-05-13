@@ -1,0 +1,26 @@
+# Git (CRITICAL)
+.git
+.gitignore
+
+# Python / venv
+venv
+edge_venv
+__pycache__
+
+# Node (just in case)
+node_modules
+
+# Media / large files
+*.mp4
+*.mov
+*.mkv
+*.avi
+videos/
+output/
+datasets/
+runs/
+
+# ML junk
+*.pt
+*.onnx
+*.pth

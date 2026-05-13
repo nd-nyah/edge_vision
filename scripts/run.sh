@@ -21,10 +21,8 @@ else
     echo "♻️ Virtual environment exists — updating..."
 fi
 
-# Activate venv
 source "$VENV_DIR/bin/activate"
 
-# Upgrade pip
 echo "⬆️ Upgrading pip..."
 pip install --upgrade pip
 
@@ -43,7 +41,6 @@ fi
 # -----------------------------
 if lsof -i :$PORT >/dev/null; then
     echo "⚠️ Port $PORT in use — stopping process..."
-
     PID=$(lsof -t -i :$PORT)
 
     if ps -p $PID -o cmd= | grep -q "uvicorn"; then
@@ -56,13 +53,34 @@ if lsof -i :$PORT >/dev/null; then
 fi
 
 # -----------------------------
-# 4. Start backend
+# 4. Detect FastAPI entrypoint (FIXED)
 # -----------------------------
 cd "$APP_DIR"
 
+echo "🔍 Detecting FastAPI entrypoint..."
+
+APP_FILE=$(find . -type f \( -name "main.py" -o -name "app.py" -o -name "server.py" \) | head -n 1)
+
+if [ -z "$APP_FILE" ]; then
+    echo "❌ No FastAPI entry file found (main.py/app.py/server.py)"
+    echo "👉 Run: find backend -type f -name '*.py'"
+    exit 1
+fi
+
+# Convert file path → module path
+APP_MODULE=$(echo "$APP_FILE" \
+    | sed 's|^\./||' \
+    | sed 's|\.py$||' \
+    | sed 's|/|.|g')
+
+echo "✅ Found module: $APP_MODULE"
+
+# -----------------------------
+# 5. Start backend
+# -----------------------------
 echo "🚀 Launching server on port $PORT..."
 
-exec "$VENV_PY" -m uvicorn main:app \
+exec "$VENV_PY" -m uvicorn "$APP_MODULE:app" \
     --reload \
     --host 0.0.0.0 \
     --port $PORT

@@ -4,23 +4,31 @@ import json
 import base64
 import time
 from collections import deque
-
+from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from detector import Detector
+from app.services.detector import Detector
+from app.core.config import YOLOV5_MODEL_PATH, YOLO_WORLD_MODEL_PATH,VIDEO_DIR
 
 router = APIRouter()
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VIDEO_DIR = os.path.join(BASE_DIR, "video")
+# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# VIDEO_DIR = os.path.join(BASE_DIR, "video")
 
-YOLOV5_MODEL = os.path.join(BASE_DIR, "models", "yolov5s.onnx")
-YOLO_WORLD_MODEL = os.path.join(BASE_DIR, "models", "yolov8s-world.pt")
+# YOLOV5_MODEL = os.path.join(BASE_DIR, "models", "yolov5s.onnx")
+# YOLO_WORLD_MODEL = os.path.join(BASE_DIR, "models", "yolov8s-world.pt")
+
+# BASE_DIR = Path(__file__).resolve().parents[2]  # app/services -> app -> backend/app
+
+# VIDEO_DIR = BASE_DIR / "video"
+
+# YOLOV5_MODEL = BASE_DIR / "models" / "yolov5s.onnx"
+# YOLO_WORLD_MODEL = BASE_DIR / "models" / "yolov8s-world.pt"
 
 detector = Detector(
-    YOLOV5_MODEL,
-    YOLO_WORLD_MODEL
+    YOLOV5_MODEL_PATH,
+    YOLO_WORLD_MODEL_PATH
 )
 
 BATCH_SIZE = 4

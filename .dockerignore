@@ -1,0 +1,57 @@
+# =========================
+# Git / IDE
+# =========================
+.git
+.github
+.vscode
+
+# =========================
+# Node / frontend junk
+# =========================
+node_modules
+frontend/node_modules
+dist
+build
+
+# =========================
+# Python / backend junk
+# =========================
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+edge_venv
+venv
+.env
+
+# =========================
+# Media / large files
+# =========================
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+
+output/
+videos/
+video/
+media/
+uploads/
+datasets/
+runs/
+
+# =========================
+# ML / model files
+# =========================
+*.pth
+
+# Ignore all first
+*.pt
+*.onnx
+
+# =========================
+# Logs / cache
+# =========================
+*.log
+.cache

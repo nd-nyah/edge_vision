@@ -8,20 +8,29 @@ pydantic==2.8.2
 starlette==0.38.2
 
 # =========================
-# Computer Vision (YOLO + ONNX)
+# Computer Vision
 # =========================
 opencv-python==4.10.0.84
 Pillow==10.4.0
 numpy>=1.23,<2.0
-onnxruntime==1.17.3
 
 # =========================
-# YOLO-World / Ultralytics
+# AI / Inference
 # =========================
+torch
+torchvision
+onnxruntime==1.17.3
 ultralytics>=8.2.0
 
 # =========================
-# Raspberry Pi Camera
+# CLIP (prevent runtime auto-install)
+# =========================
+git+https://github.com/openai/CLIP.git
+ftfy
+regex
+
+# =========================
+# Raspberry Pi / Jetson Camera
 # =========================
 picamera2>=0.3.22
 
@@ -32,6 +41,47 @@ pyyaml==6.0.2
 loguru==0.7.2
 requests==2.32.3
 python-dotenv==1.0.1
+# aiofiles==24.1.0
+
+# =========================
+# Streaming / WebSocket
+# =========================
+# websockets>=12.0
+
+# # =========================
+# # Core API
+# # =========================
+# fastapi==0.115.0
+# uvicorn[standard]==0.30.6
+# python-multipart==0.0.9
+# pydantic==2.8.2
+# starlette==0.38.2
+
+# # =========================
+# # Computer Vision (YOLO + ONNX)
+# # =========================
+# opencv-python==4.10.0.84
+# Pillow==10.4.0
+# numpy>=1.23,<2.0
+# onnxruntime==1.17.3
+
+# # =========================
+# # YOLO-World / Ultralytics
+# # =========================
+# ultralytics>=8.2.0
+
+# # =========================
+# # Raspberry Pi Camera
+# # =========================
+# picamera2>=0.3.22
+
+# # =========================
+# # Utilities
+# # =========================
+# pyyaml==6.0.2
+# loguru==0.7.2
+# requests==2.32.3
+# python-dotenv==1.0.1
 
 
 # # =========================

@@ -1,11 +1,13 @@
 import os
 import uuid
 from fastapi import APIRouter, UploadFile, File, HTTPException
+from app.core.config import VIDEO_DIR
 
 router = APIRouter()
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VIDEO_DIR = os.path.join(BASE_DIR, "video")
+# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# VIDEO_DIR = os.path.join(BASE_DIR, "video")
+# from app.core.config import YOLOV5_MODEL_PATH, YOLO_WORLD_MODEL_PATH,VIDEO_DIR
 
 os.makedirs(VIDEO_DIR, exist_ok=True)
 
