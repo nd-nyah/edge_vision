@@ -7,7 +7,7 @@ VENV_DIR="$BASE_DIR/edge_venv"
 VENV_PY="$VENV_DIR/bin/python"
 APP_DIR="$BASE_DIR/backend"
 REQ_FILE="$APP_DIR/requirements.txt"
-PORT=8001
+PORT=8000
 
 echo "🚀 Starting Edge Vision Backend..."
 

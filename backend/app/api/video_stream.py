@@ -146,3 +146,43 @@ def stream_video():
         }
     )
 
+@router.get("/video-preview")
+def video_preview():
+    print("[PREVIEW] /video-preview called")
+
+    files = sorted(f for f in os.listdir(VIDEO_DIR) if f.endswith(".mp4"))
+
+    if not files:
+        raise HTTPException(status_code=404, detail="No video found")
+
+    video_path = os.path.join(VIDEO_DIR, files[0])
+
+    cap = cv2.VideoCapture(video_path)
+
+    if not cap.isOpened():
+        raise HTTPException(status_code=500, detail="Unable to open video")
+
+    ret, frame = cap.read()
+
+    cap.release()
+
+    if not ret or frame is None:
+        raise HTTPException(status_code=500, detail="Unable to read video frame")
+
+    success, buffer = cv2.imencode(
+        ".jpg",
+        frame,
+        [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to encode preview")
+
+    return StreamingResponse(
+        iter([buffer.tobytes()]),
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+    )
