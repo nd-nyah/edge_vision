@@ -3,66 +3,115 @@ import React, { useState, useRef, useEffect } from "react";
 
 const API = import.meta.env.VITE_API_URL;
 
+/**
+ * App State Model
+ */
+const initialUIState = {
+  mode: "camera",
+
+  upload: {
+    file: null,
+    preview: null,
+    status: "idle",
+    error: null,
+  },
+
+  stream: {
+    status: "idle",
+    frame: null,
+    detections: [],
+    progress: 0,
+  },
+
+  agent: {
+    mode: "HIGH",
+    objectCount: 0,
+    detectInterval: 1,
+  },
+
+  metrics: {
+    fps: 0,
+    baselineLatency: 0,
+    agentLatency: 0,
+    loadRatio: 0,
+  },
+
+  prompt: "person, car",
+};
+
 export default function App() {
-  const [mode, setMode] = useState("upload"); // upload | camera
+  const [state, setState] = useState(initialUIState);
 
-  const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState(null);
+  // ==========================
+  // TOAST
+  // ==========================
+  const [toast, setToast] = useState(null);
 
-  const [uploading, setUploading] = useState(false);
-  const [success, setSuccess] = useState(false);
-  const [error, setError] = useState(null);
-
-  const [frame, setFrame] = useState(null);
-  const [detections, setDetections] = useState([]);
-  const [status, setStatus] = useState("idle");
-
-  const [progress, setProgress] = useState(0);
-  const [prompt, setPrompt] = useState("person, car");
-
-  const [fps, setFps] = useState(0);
-
-  const readerRef = useRef(null);
-  const fpsRef = useRef({ last: Date.now(), count: 0 });
-
-  // =========================
-  // RESET ON MODE CHANGE
-  // =========================
-  useEffect(() => {
-    setFile(null);
-    setPreview(null);
-    setFrame(null);
-    setDetections([]);
-    setProgress(0);
-    setStatus("idle");
-    setError(null);
-    setSuccess(false);
-  }, [mode]);
-
-  // =========================
-  // FILE HANDLING
-  // =========================
-  const handleFileChange = (e) => {
-    const f = e.target.files[0];
-
-    if (!f) return;
-
-    setFile(f);
-    setPreview(URL.createObjectURL(f));
+  const showToast = (message, type = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 2500);
   };
 
-  // =========================
-  // UPLOAD
-  // =========================
-  const handleUpload = async () => {
+  const readerRef = useRef(null);
+  const abortRef = useRef(false);
+  const fpsRef = useRef({ last: Date.now(), count: 0 });
+
+  // ==========================
+  // RESET MODE SAFE
+  // ==========================
+  useEffect(() => {
+    abortRef.current = true;
+    readerRef.current?.cancel();
+
+    setState((s) => ({
+      ...initialUIState,
+      mode: s.mode,
+
+      upload:
+        s.mode === "video"
+          ? { ...s.upload, file: null, preview: null, error: null }
+          : { file: null, preview: null, status: "idle", error: null },
+
+      stream: {
+        status: "idle",
+        frame: null,
+        detections: [],
+        progress: 0,
+      },
+    }));
+  }, [state.mode]);
+
+  // ==========================
+  // FILE
+  // ==========================
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
     if (!file) return;
 
-    setUploading(true);
-    setError(null);
+    setState((s) => ({
+      ...s,
+      upload: {
+        ...s.upload,
+        file,
+        preview: URL.createObjectURL(file),
+      },
+    }));
+  };
+
+  // ==========================
+  // UPLOAD + POPUP
+  // ==========================
+  const handleUpload = async () => {
+    if (!state.upload.file) return;
+
+    setState((s) => ({
+      ...s,
+      upload: { ...s.upload, status: "uploading", error: null },
+    }));
 
     try {
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("file", state.upload.file);
 
       const res = await fetch(`${API}/api/upload-video`, {
         method: "POST",
@@ -70,54 +119,55 @@ export default function App() {
       });
 
       const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Upload failed");
 
-      if (!res.ok)
-        throw new Error(data.detail || "Upload failed");
+      setState((s) => ({
+        ...s,
+        upload: { ...s.upload, status: "success" },
+        stream: { ...s.stream, status: "ready" },
+      }));
 
-      setSuccess(true);
+      showToast("Upload successful", "success");
     } catch (err) {
-      setError(err.message);
-    } finally {
-      setUploading(false);
+      setState((s) => ({
+        ...s,
+        upload: { ...s.upload, status: "error", error: err.message },
+      }));
+
+      showToast("Upload failed", "error");
     }
   };
 
-  // =========================
+  // ==========================
   // STREAM
-  // =========================
+  // ==========================
   const startStream = async () => {
-    setStatus("running");
+    abortRef.current = false;
 
-    const cleanedPrompts = prompt
+    setState((s) => ({
+      ...s,
+      stream: { ...s.stream, status: "running" },
+    }));
+
+    const cleanedPrompts = state.prompt
       .split(",")
       .map((p) => p.trim().toLowerCase())
       .filter(Boolean);
 
-    try {
-      await fetch(`${API}/api/set-prompts`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompts: cleanedPrompts,
-        }),
-      });
-    } catch {}
+    await fetch(`${API}/api/set-prompts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompts: cleanedPrompts }),
+    }).catch(() => {});
+
+    const endpoint =
+      state.mode === "camera"
+        ? `${API}/api/camera-stream`
+        : `${API}/api/video`;
 
     try {
-      // =========================
-      // SWITCH STREAM SOURCE
-      // =========================
-      const endpoint =
-        mode === "camera"
-          ? `${API}/api/camera-stream`
-          : `${API}/api/video`;
-
       const res = await fetch(endpoint);
-
-      if (!res.ok || !res.body)
-        throw new Error("Stream failed");
+      if (!res.ok || !res.body) throw new Error("Stream failed");
 
       const reader = res.body.getReader();
       readerRef.current = reader;
@@ -125,660 +175,220 @@ export default function App() {
       const decoder = new TextDecoder();
       let buffer = "";
 
-      while (true) {
+      while (!abortRef.current) {
         const { value, done } = await reader.read();
+        if (done) break;
 
-        if (done)
-          throw new Error("Stream ended");
-
-        buffer += decoder.decode(value, {
-          stream: true,
-        });
-
-        const parts = buffer.split("\n");
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split(/\r?\n/);
         buffer = parts.pop();
 
         for (const part of parts) {
           if (!part.trim()) continue;
 
           let data;
-
           try {
             data = JSON.parse(part);
           } catch {
             continue;
           }
 
-          if (data.image)
-            setFrame(data.image);
+          const img =
+            data?.frame ||
+            data?.image ||
+            data?.agent?.frame ||
+            data?.baseline?.frame;
 
-          if (Array.isArray(data.detections))
-            setDetections(data.detections);
+          const det = data?.detections || data?.agent?.detections || [];
 
-          if (data.progress !== undefined)
-            setProgress(data.progress);
-
-          // =========================
-          // FPS COUNTER
-          // =========================
+          // FPS
+          const now = Date.now();
           fpsRef.current.count++;
 
-          const now = Date.now();
-          const diff = now - fpsRef.current.last;
-
-          if (diff >= 1000) {
-            setFps(
-              Math.round(
-                (fpsRef.current.count * 1000) / diff
-              )
-            );
-
+          if (now - fpsRef.current.last >= 1000) {
+            setState((s) => ({
+              ...s,
+              metrics: { ...s.metrics, fps: fpsRef.current.count },
+            }));
             fpsRef.current.count = 0;
             fpsRef.current.last = now;
           }
 
+          // STATE UPDATE (AGENT + METRICS RESTORED)
+          setState((s) => ({
+            ...s,
+
+            stream: {
+              ...s.stream,
+              frame: img || s.stream.frame,
+              detections: det,
+              progress: data?.progress ?? s.stream.progress,
+            },
+
+            agent: {
+              ...s.agent,
+              mode: data?.mode ?? s.agent.mode,
+              objectCount: Array.isArray(det) ? det.length : s.agent.objectCount,
+              detectInterval: data?.detect_interval ?? s.agent.detectInterval,
+            },
+
+            metrics: {
+              ...s.metrics,
+              baselineLatency: data?.baseline?.latency_ms ?? s.metrics.baselineLatency,
+              agentLatency: data?.agent?.latency_ms ?? s.metrics.agentLatency,
+              loadRatio: data?.metrics?.load_ratio ?? s.metrics.loadRatio,
+            },
+          }));
+
           if (data.status === "done") {
-            setStatus("done");
-            return;
+            setState((s) => ({
+              ...s,
+              stream: { ...s.stream, status: "done" },
+            }));
           }
         }
       }
     } catch (err) {
-      console.warn(err.message);
-      setStatus("error");
+      setState((s) => ({
+        ...s,
+        stream: { ...s.stream, status: "error" },
+      }));
     }
   };
 
-  // =========================
-  // STOP
-  // =========================
-  const stopStream = async () => {
-    setStatus("stopped");
+  const stopStream = () => {
+    abortRef.current = true;
+    readerRef.current?.cancel();
 
-    if (readerRef.current) {
-      await readerRef.current.cancel();
-    }
+    setState((s) => ({
+      ...s,
+      stream: { ...s.stream, status: "stopped" },
+    }));
   };
 
-  // =========================
+  // ==========================
   // UI
-  // =========================
+  // ==========================
   return (
-    <div
-      style={{
-        maxWidth: 800,
-        margin: "auto",
-        padding: 20,
-      }}
-    >
+    <div style={{
+      height: "100vh",
+      display: "flex",
+      flexDirection: "column",
+      background: "#070A0F",
+      color: "#fff",
+      fontFamily: "system-ui",
+    }}>
+
+      {/* TOAST */}
+      {toast && (
+        <div style={{
+          position: "fixed",
+          top: 20,
+          right: 20,
+          padding: "10px 14px",
+          borderRadius: 8,
+          background: toast.type === "error" ? "#b00020" : "#1db954",
+          zIndex: 9999,
+        }}>
+          {toast.message}
+        </div>
+      )}
+
       <div className="banner">
         <div className="banner-text">
-          Computer Vision - Video and Edge Device - AI Insight Analysis - Web Streaming  📹 
-          • Computer Vision - Video and Edge Device - AI Insight Analysis - Web Streaming  📹
+          Computer Vision • Full Agent Dashboard
         </div>
       </div>
 
-      {/* MODE */}
-      <h2>Input Mode</h2>
+      {/* CONTROLS */}
+      <div style={{ display: "flex", gap: 10, padding: 10 }}>
+        <button onClick={() => setState((s) => ({ ...s, mode: "camera" }))}>
+          🎥 Camera
+        </button>
 
-      <button
-        onClick={() => setMode("upload")}
-      >
-        📁 Upload Mode
-      </button>
+        <button onClick={() => setState((s) => ({ ...s, mode: "video" }))}>
+          📁 Video
+        </button>
 
-      <button
-        onClick={() => setMode("camera")}
-      >
-        🎥 Camera Mode
-      </button>
+        {state.mode === "video" && (
+          <>
+            <input type="file" accept="video/*" onChange={handleFileChange} />
+            <button onClick={handleUpload}>
+              {state.upload.status === "uploading" ? "Uploading..." : "Upload"}
+            </button>
+          </>
+        )}
 
-      <hr />
+        <input
+          value={state.prompt}
+          onChange={(e) =>
+            setState((s) => ({ ...s, prompt: e.target.value }))
+          }
+          style={{ flex: 1 }}
+        />
 
-      {/* =========================
-          UPLOAD MODE ONLY
-      ========================= */}
+        <button onClick={startStream}>▶</button>
+        <button onClick={stopStream}>⏹</button>
+      </div>
 
-      {mode === "upload" && (
-        <>
-          <h2>📁 Upload Video</h2>
+      {/* MAIN VIEW */}
+      <div style={{ flex: 1, display: "flex" }}>
 
-          <input
-            type="file"
-            accept="video/*"
-            onChange={handleFileChange}
-          />
-
-          <button
-            onClick={handleUpload}
-            disabled={uploading}
-          >
-            {uploading
-              ? "Uploading..."
-              : "Upload"}
-          </button>
-
-          {success && <p>✅ Uploaded</p>}
-
-          {error && (
-            <p style={{ color: "red" }}>
-              {error}
-            </p>
+        {/* VIDEO */}
+        <div style={{ flex: 3, position: "relative" }}>
+          {state.stream.frame ? (
+            <img
+              src={`data:image/jpeg;base64,${state.stream.frame}`}
+              style={{ width: "100%", height: "100%", objectFit: "contain" }}
+            />
+          ) : (
+            <p>No stream</p>
           )}
-        </>
-      )}
 
-      {/* =========================
-          PREVIEW
-      ========================= */}
+          <div style={{ position: "absolute", top: 10, right: 10 }}>
+            👁 {state.agent.objectCount}
+          </div>
 
-      <h3>📺 Input Preview</h3>
+          <div style={{ position: "absolute", bottom: 10, left: 10 }}>
+            ⚙ FPS: {state.metrics.fps}
+          </div>
 
-      {/* Upload Preview */}
-      {mode === "upload" && preview && (
-        <video
-          width="100%"
-          controls
-          src={preview}
-        />
-      )}
+          <div style={{ position: "absolute", bottom: 10, right: 10 }}>
+            🔥 Interval: {state.agent.detectInterval}
+          </div>
+        </div>
 
-      {/* Video File Preview */}
-      {mode === "video" && (
-        <img
-          src={`${API}/api/video-preview`}
-          style={{ width: "100%" }}
-          alt="video-preview"
-        />
-      )}
-      
-      {/* Camera Preview */}
-      {mode === "camera" && (
-        <img
-          src={`${API}/api/camera-preview`}
-          style={{ width: "100%" }}
-          alt="camera-preview"
-        />
-      )}
+        {/* ✅ RIGHT SIDEBAR (FIXED - WAS MISSING) */}
+        <div style={{
+          flex: 1,
+          borderLeft: "1px solid #222",
+          padding: 10
+        }}>
+          <h3>Agent Dashboard</h3>
 
-      <hr />
+          <p>Mode: {state.agent.mode}</p>
+          <p>Objects: {state.agent.objectCount}</p>
+          <p>Status: {state.stream.status}</p>
+          <p>Progress: {state.stream.progress.toFixed(1)}%</p>
 
-      {/* PROMPT */}
-      <h2>
-        🔎 Prompt (auto switches YOLO →
-        YOLO-World)
-      </h2>
+          <hr />
 
-      <input
-        value={prompt}
-        onChange={(e) =>
-          setPrompt(e.target.value)
-        }
-        style={{
-          width: "100%",
-          padding: 10,
-        }}
-      />
+          <div style={{
+            marginTop: 10,
+            padding: 10,
+            borderRadius: 8,
+            background: "#111",
+            border: "1px solid #333",
+          }}>
+            <p>🔴 Base: {state.metrics.baselineLatency.toFixed(1)} ms</p>
+            <p>🟢 Agent: {state.metrics.agentLatency.toFixed(1)} ms</p>
+            <p>📊 Load: {state.metrics.loadRatio.toFixed(2)}x</p>
+          </div>
+        </div>
 
-      <hr />
-
-      {/* DETECTION */}
-      <h2>🧠 Detection</h2>
-
-      <button onClick={startStream}>
-        ▶ Start Stream
-      </button>
-
-      <button onClick={stopStream}>
-        ⏹ Stop
-      </button>
-
-      <p>Status: {status}</p>
-
-      <p>FPS: {fps}</p>
-
-      <p>
-        Progress: [
-        <span style={{ color: "green" }}>
-          {"█".repeat(
-            Math.round(progress / 5)
-          )}
-        </span>
-        <span style={{ color: "#ddd" }}>
-          {"░".repeat(
-            20 -
-              Math.round(progress / 5)
-          )}
-        </span>
-        ] {progress.toFixed(1)}%
-      </p>
-
-      {/* STREAM OUTPUT */}
-      {frame ? (
-        <img
-          src={`data:image/jpeg;base64,${frame}`}
-          style={{
-            width: "100%",
-            marginTop: 20,
-          }}
-          alt="stream-output"
-        />
-      ) : (
-        <p>No stream yet</p>
-      )}
-
-      {/* DETECTIONS */}
-      {detections.length > 0 ? (
-        <ul>
-          {detections.map((d, i) => (
-            <li key={i}>
-              {d.label} (
-              {Math.round(
-                d.confidence * 100
-              )}
-              %)
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p style={{ opacity: 0.6 }}>
-          No matching objects detected
-        </p>
-      )}
+      </div>
     </div>
   );
 }
 
-
-
-// import "./styles/banner.css";
-// import React, { useState, useRef, useEffect } from "react";
-
-// const API = import.meta.env.VITE_API_URL;
-
-// export default function App() {
-//   const [mode, setMode] = useState("upload"); // upload | camera
-
-//   const [file, setFile] = useState(null);
-//   const [preview, setPreview] = useState(null);
-
-//   const [uploading, setUploading] = useState(false);
-//   const [success, setSuccess] = useState(false);
-//   const [error, setError] = useState(null);
-
-//   const [frame, setFrame] = useState(null);
-//   const [detections, setDetections] = useState([]);
-//   const [status, setStatus] = useState("idle");
-
-//   const [progress, setProgress] = useState(0);
-//   const [prompt, setPrompt] = useState("person, car");
-
-//   const [fps, setFps] = useState(0);
-
-//   const readerRef = useRef(null);
-//   const fpsRef = useRef({ last: Date.now(), count: 0 });
-
-//   // =========================
-//   // RESET ON MODE CHANGE
-//   // =========================
-//   useEffect(() => {
-//     setFile(null);
-//     setPreview(null);
-//     setFrame(null);
-//     setDetections([]);
-//     setProgress(0);
-//     setStatus("idle");
-//     setError(null);
-//     setSuccess(false);
-//   }, [mode]);
-
-//   // =========================
-//   // FILE HANDLING
-//   // =========================
-//   const handleFileChange = (e) => {
-//     const f = e.target.files[0];
-
-//     if (!f) return;
-
-//     setFile(f);
-//     setPreview(URL.createObjectURL(f));
-//   };
-
-//   // =========================
-//   // UPLOAD
-//   // =========================
-//   const handleUpload = async () => {
-//     if (!file) return;
-
-//     setUploading(true);
-//     setError(null);
-
-//     try {
-//       const formData = new FormData();
-//       formData.append("file", file);
-
-//       const res = await fetch(`${API}/api/upload-video`, {
-//         method: "POST",
-//         body: formData,
-//       });
-
-//       const data = await res.json();
-
-//       if (!res.ok)
-//         throw new Error(data.detail || "Upload failed");
-
-//       setSuccess(true);
-//     } catch (err) {
-//       setError(err.message);
-//     } finally {
-//       setUploading(false);
-//     }
-//   };
-
-//   // =========================
-//   // STREAM
-//   // =========================
-//   const startStream = async () => {
-//     setStatus("running");
-
-//     const cleanedPrompts = prompt
-//       .split(",")
-//       .map((p) => p.trim().toLowerCase())
-//       .filter(Boolean);
-
-//     try {
-//       await fetch(`${API}/api/set-prompts`, {
-//         method: "POST",
-//         headers: {
-//           "Content-Type": "application/json",
-//         },
-//         body: JSON.stringify({
-//           prompts: cleanedPrompts,
-//         }),
-//       });
-//     } catch {}
-
-//     try {
-//       // =========================
-//       // SWITCH STREAM SOURCE
-//       // =========================
-//       const endpoint =
-//         mode === "camera"
-//           ? `${API}/api/camera-stream`
-//           : `${API}/api/video`;
-
-//       const res = await fetch(endpoint);
-
-//       if (!res.ok || !res.body)
-//         throw new Error("Stream failed");
-
-//       const reader = res.body.getReader();
-//       readerRef.current = reader;
-
-//       const decoder = new TextDecoder();
-//       let buffer = "";
-
-//       while (true) {
-//         const { value, done } = await reader.read();
-
-//         if (done)
-//           throw new Error("Stream ended");
-
-//         buffer += decoder.decode(value, {
-//           stream: true,
-//         });
-
-//         const parts = buffer.split("\n");
-//         buffer = parts.pop();
-
-//         for (const part of parts) {
-//           if (!part.trim()) continue;
-
-//           let data;
-
-//           try {
-//             data = JSON.parse(part);
-//           } catch {
-//             continue;
-//           }
-
-//           if (data.image)
-//             setFrame(data.image);
-
-//           if (Array.isArray(data.detections))
-//             setDetections(data.detections);
-
-//           if (data.progress !== undefined)
-//             setProgress(data.progress);
-
-//           // =========================
-//           // FPS COUNTER
-//           // =========================
-//           fpsRef.current.count++;
-
-//           const now = Date.now();
-//           const diff = now - fpsRef.current.last;
-
-//           if (diff >= 1000) {
-//             setFps(
-//               Math.round(
-//                 (fpsRef.current.count * 1000) / diff
-//               )
-//             );
-
-//             fpsRef.current.count = 0;
-//             fpsRef.current.last = now;
-//           }
-
-//           if (data.status === "done") {
-//             setStatus("done");
-//             return;
-//           }
-//         }
-//       }
-//     } catch (err) {
-//       console.warn(err.message);
-//       setStatus("error");
-//     }
-//   };
-
-//   // =========================
-//   // STOP
-//   // =========================
-//   const stopStream = async () => {
-//     setStatus("stopped");
-
-//     if (readerRef.current) {
-//       await readerRef.current.cancel();
-//     }
-//   };
-
-//   // =========================
-//   // UI
-//   // =========================
-//   return (
-//     <div
-//       style={{
-//         maxWidth: 800,
-//         margin: "auto",
-//         padding: 20,
-//       }}
-//     >
-//       <div className="banner">
-//         <div className="banner-text">
-//           Computer Vision - Video and Edge Device - AI Insight Analysis - Web Streaming  📹 
-//           • Computer Vision - Video and Edge Device - AI Insight Analysis - Web Streaming  📹
-//         </div>
-//       </div>
-
-//       {/* MODE */}
-//       <h2>Input Mode</h2>
-
-//       <button
-//         onClick={() => setMode("upload")}
-//       >
-//         📁 Upload Mode
-//       </button>
-
-//       <button
-//         onClick={() => setMode("camera")}
-//       >
-//         🎥 Camera Mode
-//       </button>
-
-//       <hr />
-
-//       {/* =========================
-//           UPLOAD MODE ONLY
-//       ========================= */}
-
-//       {mode === "upload" && (
-//         <>
-//           <h2>📁 Upload Video</h2>
-
-//           <input
-//             type="file"
-//             accept="video/*"
-//             onChange={handleFileChange}
-//           />
-
-//           <button
-//             onClick={handleUpload}
-//             disabled={uploading}
-//           >
-//             {uploading
-//               ? "Uploading..."
-//               : "Upload"}
-//           </button>
-
-//           {success && <p>✅ Uploaded</p>}
-
-//           {error && (
-//             <p style={{ color: "red" }}>
-//               {error}
-//             </p>
-//           )}
-//         </>
-//       )}
-
-//       {/* =========================
-//           PREVIEW
-//       ========================= */}
-
-//       <h3>📺 Input Preview</h3>
-
-//       {/* Upload Preview */}
-//       {mode === "upload" && preview && (
-//         <video
-//           width="100%"
-//           controls
-//           src={preview}
-//         />
-//       )}
-
-//       {/* Video File Preview */}
-//       {mode === "video" && (
-//         <img
-//           src={`${API}/api/video-preview`}
-//           style={{ width: "100%" }}
-//           alt="video-preview"
-//         />
-//       )}
-      
-//       {/* Camera Preview */}
-//       {mode === "camera" && (
-//         <img
-//           src={`${API}/api/camera-preview`}
-//           style={{ width: "100%" }}
-//           alt="camera-preview"
-//         />
-//       )}
-
-//       <hr />
-
-//       {/* PROMPT */}
-//       <h2>
-//         🔎 Prompt (auto switches YOLO →
-//         YOLO-World)
-//       </h2>
-
-//       <input
-//         value={prompt}
-//         onChange={(e) =>
-//           setPrompt(e.target.value)
-//         }
-//         style={{
-//           width: "100%",
-//           padding: 10,
-//         }}
-//       />
-
-//       <hr />
-
-//       {/* DETECTION */}
-//       <h2>🧠 Detection</h2>
-
-//       <button onClick={startStream}>
-//         ▶ Start Stream
-//       </button>
-
-//       <button onClick={stopStream}>
-//         ⏹ Stop
-//       </button>
-
-//       <p>Status: {status}</p>
-
-//       <p>FPS: {fps}</p>
-
-//       <p>
-//         Progress: [
-//         <span style={{ color: "green" }}>
-//           {"█".repeat(
-//             Math.round(progress / 5)
-//           )}
-//         </span>
-//         <span style={{ color: "#ddd" }}>
-//           {"░".repeat(
-//             20 -
-//               Math.round(progress / 5)
-//           )}
-//         </span>
-//         ] {progress.toFixed(1)}%
-//       </p>
-
-//       {/* STREAM OUTPUT */}
-//       {frame ? (
-//         <img
-//           src={`data:image/jpeg;base64,${frame}`}
-//           style={{
-//             width: "100%",
-//             marginTop: 20,
-//           }}
-//           alt="stream-output"
-//         />
-//       ) : (
-//         <p>No stream yet</p>
-//       )}
-
-//       {/* DETECTIONS */}
-//       {detections.length > 0 ? (
-//         <ul>
-//           {detections.map((d, i) => (
-//             <li key={i}>
-//               {d.label} (
-//               {Math.round(
-//                 d.confidence * 100
-//               )}
-//               %)
-//             </li>
-//           ))}
-//         </ul>
-//       ) : (
-//         <p style={{ opacity: 0.6 }}>
-//           No matching objects detected
-//         </p>
-//       )}
-//     </div>
-//   );
-// }
 
