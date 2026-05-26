@@ -1,18 +1,17 @@
 import time
+import cv2
+import os
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse, Response
 
 from app.pipelines.jetson_detector_pipeline import JetsonDetectorPipeline
 from app.services.detector import Detector
-from app.core.config import (
-    YOLOV5_MODEL_PATH,
-    YOLO_WORLD_MODEL_PATH,
-)
+from app.core.config import YOLOV5_MODEL_PATH, YOLO_WORLD_MODEL_PATH
 
 router = APIRouter()
 
 # =========================
-# INIT
+# DETECTOR + PIPELINE
 # =========================
 detector = Detector(
     YOLOV5_MODEL_PATH,
@@ -20,6 +19,11 @@ detector = Detector(
 )
 
 pipeline = JetsonDetectorPipeline(detector)
+
+CAMERA_URL = os.getenv(
+    "CAMERA_URL",
+    "http://127.0.0.1:9000/video"
+)
 
 pipeline_started = False
 
@@ -35,21 +39,34 @@ def start_pipeline():
 
     pipeline_started = True
     pipeline.start()
-    print("[STREAM] Jetson pipeline started")
+    print("[STREAM] Pipeline started")
 
 
 # =========================
-# MJPEG STREAM (OPTIMIZED)
+# CAMERA FEED LOOP
 # =========================
 def generate_frames():
+
     start_pipeline()
 
+    cap = cv2.VideoCapture(CAMERA_URL)
+
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open camera stream: {CAMERA_URL}")
+
     while True:
+
+        ret, frame = cap.read()
+
+        if not ret:
+            time.sleep(0.01)
+            continue
+
+        output = pipeline.process_frame(frame)
 
         jpeg = pipeline.get_jpeg()
 
         if jpeg is None:
-            time.sleep(0.01)
             continue
 
         yield (
@@ -88,12 +105,9 @@ def camera_preview():
     output = pipeline.get_latest_output()
 
     if output is None:
-        return Response(
-            content="CAMERA WARMING UP...",
-            media_type="text/plain"
-        )
+        return Response("WARMING UP...", media_type="text/plain")
 
     return Response(
-        content="LIVE STREAM ACTIVE",
+        f"LIVE\nFPS: {output.get('fps', 0)}",
         media_type="text/plain"
     )

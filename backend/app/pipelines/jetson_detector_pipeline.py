@@ -1,364 +1,204 @@
 import cv2
 import time
-import threading
+import os
 from collections import deque
 
-from app.services.agents.adaptive_bc_agent import (
-    ComputeAgent,
-    FPSState,
-)
+from app.services.agents.adaptive_bc_agent import ComputeAgent, FPSState
 
 
 class JetsonDetectorPipeline:
 
-    def __init__(
-        self,
-        detector,
-        sensor_id=0,
-        width=1280,
-        height=720,
-        fps=30,
-        time_window=0.5,
-    ):
+    def __init__(self, detector, time_window=0.5):
 
         self.detector = detector
         self.agent = ComputeAgent()
 
-        self.sensor_id = sensor_id
-        self.width = width
-        self.height = height
-        self.camera_fps = fps
+        # 🔥 HOST CAMERA STREAM (NO CSI)
+        self.camera_url = os.getenv(
+            "CAMERA_URL",
+            "http://127.0.0.1:9000/video"
+        )
 
         self.TIME_WINDOW = time_window
 
-        # ==========================================
-        # MEMORY
-        # ==========================================
         self.base_memory = deque(maxlen=300)
         self.agent_memory = deque(maxlen=300)
 
-        # ==========================================
-        # FPS
-        # ==========================================
         self.fps_counter = 0
         self.fps_timer = time.time()
         self.current_fps = 0
 
-        # ==========================================
-        # LATENCY
-        # ==========================================
         self.base_latency = 0
         self.agent_latency = 0
 
-        # ==========================================
-        # SHARED OUTPUT
-        # ==========================================
         self.latest_output = None
-        self.output_lock = threading.Lock()
-
-        # ==========================================
-        # THREAD CONTROL
-        # ==========================================
         self.running = False
 
-    # =====================================================
-    # GSTREAMER
-    # =====================================================
-    def gstreamer_pipeline(self):
-
-        return (
-            f"nvarguscamerasrc sensor-id={self.sensor_id} ! "
-            f"video/x-raw(memory:NVMM), "
-            f"width=(int){self.width}, "
-            f"height=(int){self.height}, "
-            f"framerate=(fraction){self.camera_fps}/1 ! "
-            "nvvidconv flip-method=0 ! "
-            "video/x-raw, format=(string)BGRx ! "
-            "videoconvert ! "
-            "video/x-raw, format=(string)BGR ! "
-            "appsink drop=true max-buffers=1 sync=false"
-        )
-
-    # =====================================================
+    # =========================
     # FPS
-    # =====================================================
+    # =========================
     def update_fps(self):
-
         self.fps_counter += 1
-
         elapsed = time.time() - self.fps_timer
 
         if elapsed >= 1.0:
-
             self.current_fps = self.fps_counter / elapsed
-
             self.fps_counter = 0
             self.fps_timer = time.time()
 
-    # =====================================================
-    # OBJECT ID
-    # =====================================================
-    def make_id(self, detection):
-
-        x = int(detection["bbox"]["x"] // 30)
-        y = int(detection["bbox"]["y"] // 30)
-
-        return f"{detection['label']}_{x}_{y}"
-
-    # =====================================================
-    # DETECT
-    # =====================================================
+    # =========================
+    # DETECTION
+    # =========================
     def _detect(self, frame, memory, now):
 
-        rgb_frame = frame[:, :, ::-1]
+        rgb = frame[:, :, ::-1]
 
-        detections, _ = self.detector.detect(rgb_frame)
-
-        if not detections:
-            detections = []
+        detections, _ = self.detector.detect(rgb)
+        detections = detections or []
 
         for d in detections:
-
             memory.append({
-                "id": self.make_id(d),
                 "data": d,
                 "time": now
             })
 
-        visible = [
+        return [
             x["data"]
             for x in memory
             if now - x["time"] < self.TIME_WINDOW
         ]
 
-        return visible
-
-    # =====================================================
-    # MAIN PIPELINE
-    # =====================================================
+    # =========================
+    # MAIN PROCESS
+    # =========================
     def process_frame(self, frame):
 
         self.update_fps()
-
         now = time.time()
 
-        # =================================================
-        # 🔴 BASELINE
-        # =================================================
-        base_frame = frame.copy()
+        # BASELINE
+        base = frame.copy()
+        t0 = time.time()
 
-        base_start = time.time()
+        base_vis = self._detect(base, self.base_memory, now)
+        base_draw = self.detector.draw(base, base_vis)
 
-        base_visible = self._detect(
-            base_frame,
-            self.base_memory,
-            now
-        )
+        self.base_latency = (time.time() - t0) * 1000
 
-        base_drawn = self.detector.draw(
-            base_frame,
-            base_visible
-        )
-
-        self.base_latency = (
-            time.time() - base_start
-        ) * 1000
-
-        # =================================================
-        # 🟢 AGENT
-        # =================================================
-        object_count = len(base_visible)
-
+        # AGENT
         state = FPSState(
             fps=self.current_fps,
-            object_count=object_count
+            object_count=len(base_vis)
         )
 
         action = self.agent.decide(state)
 
-        agent_frame = frame.copy()
+        agent = frame.copy()
+        t1 = time.time()
 
-        agent_start = time.time()
-
-        run_detection = True
-
-        # ==============================================
-        # AGENT CONTROL
-        # ==============================================
         if action.mode == "LOW_POWER":
-
-            run_detection = (
-                self.fps_counter % 2 == 0
-            )
-
+            run = (self.fps_counter % 2 == 0)
         elif action.mode == "ULTRA_LOW_POWER":
-
-            run_detection = (
-                self.fps_counter % 4 == 0
-            )
-
-        # ==============================================
-        # DETECT OR REUSE MEMORY
-        # ==============================================
-        if run_detection:
-
-            agent_visible = self._detect(
-                agent_frame,
-                self.agent_memory,
-                now
-            )
-
+            run = (self.fps_counter % 4 == 0)
         else:
+            run = True
 
-            agent_visible = [
+        if run:
+            agent_vis = self._detect(agent, self.agent_memory, now)
+        else:
+            agent_vis = [
                 x["data"]
                 for x in self.agent_memory
                 if now - x["time"] < self.TIME_WINDOW
             ]
 
-        agent_drawn = self.detector.draw(
-            agent_frame,
-            agent_visible
-        )
+        agent_draw = self.detector.draw(agent, agent_vis)
 
-        self.agent_latency = (
-            time.time() - agent_start
-        ) * 1000
-
-        # =================================================
-        # METRICS
-        # =================================================
-        load_ratio = self.agent_latency / max(
-            self.base_latency,
-            1e-6
-        )
+        self.agent_latency = (time.time() - t1) * 1000
 
         return {
-            "frame": agent_drawn,
-            "detections": agent_visible,
+            "frame": agent_draw,
+            "detections": agent_vis,
             "fps": round(self.current_fps, 2),
-            "mode": action.mode,
 
             "baseline": {
-                "frame": base_drawn,
-                "detections": base_visible,
-                "latency_ms": round(
-                    self.base_latency,
-                    2
-                ),
+                "frame": base_draw,
+                "latency_ms": round(self.base_latency, 2),
             },
 
             "agent": {
-                "frame": agent_drawn,
-                "detections": agent_visible,
-                "latency_ms": round(
-                    self.agent_latency,
-                    2
-                ),
-                "mode": action.mode
+                "frame": agent_draw,
+                "latency_ms": round(self.agent_latency, 2),
+                "mode": action.mode,
             },
 
             "metrics": {
-                "baseline_latency_ms":
-                    round(self.base_latency, 2),
-
-                "agent_latency_ms":
-                    round(self.agent_latency, 2),
-
-                "load_ratio":
-                    round(load_ratio, 2),
+                "baseline_latency_ms": round(self.base_latency, 2),
+                "agent_latency_ms": round(self.agent_latency, 2),
             }
         }
 
-    # =====================================================
-    # CAMERA LOOP
-    # =====================================================
+    # =========================
+    # CAMERA LOOP (HOST STREAM)
+    # =========================
     def camera_loop(self):
 
-        cap = cv2.VideoCapture(
-            self.gstreamer_pipeline(),
-            cv2.CAP_GSTREAMER
-        )
+        print(f"[CAM] Connecting to {self.camera_url}")
+
+        cap = cv2.VideoCapture(self.camera_url)
 
         if not cap.isOpened():
-            raise RuntimeError(
-                "Failed to open CSI camera"
-            )
+            raise RuntimeError("Failed to open host camera stream")
 
-        # Camera warmup
-        for _ in range(10):
-            cap.read()
-
-        print("[JETSON] Camera started")
+        self.running = True
 
         while self.running:
 
             ret, frame = cap.read()
-
             if not ret:
                 continue
 
-            output = self.process_frame(frame)
-
-            with self.output_lock:
-                self.latest_output = output
+            self.latest_output = self.process_frame(frame)
 
         cap.release()
 
-    # =====================================================
+    # =========================
     # START
-    # =====================================================
+    # =========================
     def start(self):
 
         if self.running:
             return
 
-        self.running = True
+        import threading
 
-        self.worker = threading.Thread(
+        threading.Thread(
             target=self.camera_loop,
             daemon=True
-        )
+        ).start()
 
-        self.worker.start()
+        print("[PIPELINE] Started (HOST CAMERA MODE)")
 
-        print("[JETSON] Pipeline started")
-
-    # =====================================================
-    # STOP
-    # =====================================================
-    def stop(self):
-
-        self.running = False
-
-    # =====================================================
+    # =========================
     # OUTPUT
-    # =====================================================
+    # =========================
     def get_latest_output(self):
+        return self.latest_output
 
-        with self.output_lock:
-
-            return self.latest_output
-
-    # =====================================================
-    # JPEG
-    # =====================================================
     def get_jpeg(self):
 
-        with self.output_lock:
+        if not self.latest_output:
+            return None
 
-            if self.latest_output is None:
-                return None
+        frame = self.latest_output["frame"]
 
-            frame = self.latest_output["frame"]
-
-        success, buffer = cv2.imencode(
+        ok, buf = cv2.imencode(
             ".jpg",
             frame,
             [int(cv2.IMWRITE_JPEG_QUALITY), 70]
         )
 
-        if not success:
+        if not ok:
             return None
 
-        return buffer.tobytes()
+        return buf.tobytes()

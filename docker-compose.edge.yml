@@ -12,7 +12,7 @@ services:
 
     volumes:
       - ./backend:/backend
-      - /tmp/argus_socket:/tmp/argus_socket   # 🔥 REQUIRED for CSI
+      - /tmp/argus_socket:/tmp/argus_socket
 
     working_dir: /backend
 
@@ -24,10 +24,8 @@ services:
       PYTHONUNBUFFERED: 1
       YOLO_CONFIG_DIR: /tmp
       ULTRALYTICS_AUTOINSTALL: "false"
+      OPENCV_VIDEOIO_PRIORITY_GSTREAMER: 1000
 
-    # =========================
-    # 🔥 JETSON CAMERA FIX
-    # =========================
     runtime: nvidia
     privileged: true
     network_mode: host
@@ -36,11 +34,20 @@ services:
       - /dev/video0:/dev/video0
       - /dev/video1:/dev/video1
 
+      # 🔥 Jetson CSI / Argus devices
+      - /dev/nvhost-ctrl:/dev/nvhost-ctrl
+      - /dev/nvhost-ctrl-gpu:/dev/nvhost-ctrl-gpu
+      - /dev/nvhost-prof-gpu:/dev/nvhost-prof-gpu
+      - /dev/nvmap:/dev/nvmap
+      - /dev/nvhost-vi:/dev/nvhost-vi
+      - /dev/nvhost-vic:/dev/nvhost-vic
+      - /dev/nvhost-as-gpu:/dev/nvhost-as-gpu
+
     command: >
       uvicorn app.main:app
       --host 0.0.0.0
       --port 8001
-      --reload
+      --workers 1
 
     restart: unless-stopped
 
@@ -65,8 +72,7 @@ services:
       - ./.env
 
     environment:
-      # IMPORTANT: inside Docker use backend service name or host networking
-      VITE_API_URL: http://localhost:8001
+      VITE_API_URL: http://backend:8001
       TARGET: ${TARGET:-jetson}
 
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
@@ -75,4 +81,5 @@ services:
       - backend
 
     restart: unless-stopped
+
 
