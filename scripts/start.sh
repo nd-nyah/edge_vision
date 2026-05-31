@@ -1,87 +1,78 @@
 #!/bin/bash
+
 set -e
 
-BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+echo "🚀 Starting host camera service (Python2)..."
 
-HOST_VENV="$BASE_DIR/host_venv"
-PY="$HOST_VENV/bin/python"
+# --------------------------------------------------
+# PROJECT ROOT (FIXED)
+# --------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# FIXED: correct file location (project root)
-HOST_CAM="$BASE_DIR/host_cam_service.py"
+SCRIPT="$BASE_DIR/host_cam_service.py"
+VIDEO_DIR="$BASE_DIR/backend/app/camera"
 
+LOG_FILE="$BASE_DIR/host_camera.log"
 PID_FILE="$BASE_DIR/host_camera.pid"
 
-echo "🚀 Setting up HOST CAMERA ENV..."
+PYTHON="/usr/bin/python2"
 
-# =====================================================
-# 0. STOP OLD CAMERA PROCESS (if running)
-# =====================================================
+echo "📁 Base: $BASE_DIR"
+echo "💾 Video dir: $VIDEO_DIR"
+echo "🐍 Python: $PYTHON"
+
+# --------------------------------------------------
+# CHECK FILES
+# --------------------------------------------------
+if [ ! -f "$SCRIPT" ]; then
+    echo "❌ host_cam_service.py not found at $SCRIPT"
+    exit 1
+fi
+
+if [ ! -f "$PYTHON" ]; then
+    echo "❌ Python2 not found at $PYTHON"
+    exit 1
+fi
+
+# --------------------------------------------------
+# STOP OLD INSTANCE
+# --------------------------------------------------
+echo "🛑 Stopping previous instance..."
+
 if [ -f "$PID_FILE" ]; then
     OLD_PID=$(cat "$PID_FILE")
-
-    if ps -p $OLD_PID > /dev/null 2>&1; then
-        echo "🛑 Stopping old host camera (PID $OLD_PID)..."
-        kill -9 $OLD_PID || true
-    fi
-
+    kill -9 "$OLD_PID" 2>/dev/null || true
     rm -f "$PID_FILE"
 fi
 
-# Kill anything using port 9000
-if lsof -i :9000 >/dev/null 2>&1; then
-    echo "⚠️ Port 9000 in use — killing process..."
-    kill -9 $(lsof -t -i :9000) || true
-fi
+pkill -f "$SCRIPT" 2>/dev/null || true
 
-# =====================================================
-# 1. DELETE OLD VENV
-# =====================================================
-if [ -d "$HOST_VENV" ]; then
-    echo "🧹 Removing old host env..."
-    rm -rf "$HOST_VENV"
-fi
+# --------------------------------------------------
+# CLEAN OLD VIDEOS
+# --------------------------------------------------
+echo "🧹 Cleaning old recordings..."
 
-# =====================================================
-# 2. CREATE VENV
-# =====================================================
-python3 -m venv "$HOST_VENV"
-
-$PY -m pip install --upgrade pip
-
-# =====================================================
-# 3. SYSTEM DEPENDENCIES (JETSON IMPORTANT)
-# =====================================================
-echo "📦 Installing system OpenCV (Jetson optimized)..."
-
-sudo apt update
-sudo apt install -y python3-opencv
-
-# =====================================================
-# 4. PYTHON DEPENDENCIES (NO OPENCV HERE)
-# =====================================================
-echo "📦 Installing Python deps (FastAPI stack only)..."
-
-$PY -m pip install fastapi uvicorn numpy
-
-echo "✅ Host environment ready"
-
-# =====================================================
-# 5. START CAMERA SERVICE
-# =====================================================
-if [ -f "$HOST_CAM" ]; then
-    echo "📷 Starting host camera service..."
-
-    nohup $PY "$HOST_CAM" \
-        > "$BASE_DIR/host_camera.log" 2>&1 &
-
-    echo $! > "$PID_FILE"
-
-    sleep 2
-
-    echo "✅ Host camera running"
-    echo "🌐 Stream:"
-    echo "   http://127.0.0.1:9000/video"
+if [ -d "$VIDEO_DIR" ]; then
+    find "$VIDEO_DIR" -type f -name "*.mp4" -delete
+    find "$VIDEO_DIR" -type f -name "*.mkv" -delete
+    find "$VIDEO_DIR" -type f -name "*.avi" -delete
 else
-    echo "❌ host_cam_service.py not found at: $HOST_CAM"
-    exit 1
+    mkdir -p "$VIDEO_DIR"
 fi
+
+echo "✅ Camera folder ready"
+
+# --------------------------------------------------
+# ENV VARS
+# --------------------------------------------------
+export VIDEO_DIR="$VIDEO_DIR"
+export PYTHONUNBUFFERED=1
+
+# --------------------------------------------------
+# START (LIVE MODE)
+# --------------------------------------------------
+echo "🎥 Launching camera service (LIVE)..."
+cd "$BASE_DIR"
+
+exec "$PYTHON" "$SCRIPT"

@@ -1,91 +1,177 @@
-import time
-import cv2
 import os
-from fastapi import APIRouter
-from fastapi.responses import StreamingResponse, Response
+import cv2
+import json
+import base64
+import time
 
-from app.pipelines.jetson_detector_pipeline import JetsonDetectorPipeline
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
+
 from app.services.detector import Detector
-from app.core.config import YOLOV5_MODEL_PATH, YOLO_WORLD_MODEL_PATH
+from app.pipelines.video_detector_pipeline import DetectorPipeline
+
+from app.core.config import (
+    YOLOV5_MODEL_PATH,
+    YOLO_WORLD_MODEL_PATH,
+    CAMERA_DIR
+)
 
 router = APIRouter()
 
-# =========================
-# DETECTOR + PIPELINE
-# =========================
 detector = Detector(
     YOLOV5_MODEL_PATH,
     YOLO_WORLD_MODEL_PATH
 )
 
-pipeline = JetsonDetectorPipeline(detector)
+pipeline = DetectorPipeline(detector)
 
-CAMERA_URL = os.getenv(
-    "CAMERA_URL",
-    "http://127.0.0.1:9000/video"
-)
-
-pipeline_started = False
+BATCH_SIZE = 32
+JPEG_QUALITY = 70
 
 
-# =========================
-# START PIPELINE
-# =========================
-def start_pipeline():
-    global pipeline_started
+# --------------------------------------------------
+# GET LATEST STABLE CAMERA FILE
+# --------------------------------------------------
 
-    if pipeline_started:
-        return
+def get_latest_camera():
 
-    pipeline_started = True
-    pipeline.start()
-    print("[STREAM] Pipeline started")
+    if not os.path.exists(CAMERA_DIR):
+        raise HTTPException(status_code=404, detail="Camera directory not found")
 
+    files = [
+        f for f in os.listdir(CAMERA_DIR)
+        if f.endswith(".mp4")
+    ]
 
-# =========================
-# CAMERA FEED LOOP
-# =========================
-def generate_frames():
+    if not files:
+        raise HTTPException(status_code=404, detail="No camera recording found")
 
-    start_pipeline()
+    # sort by modified time (most reliable)
+    files = sorted(
+        files,
+        key=lambda x: os.path.getmtime(os.path.join(CAMERA_DIR, x))
+    )
 
-    cap = cv2.VideoCapture(CAMERA_URL)
+    latest_file = os.path.join(CAMERA_DIR, files[-1])
 
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open camera stream: {CAMERA_URL}")
+    # avoid reading file while still being written
+    size1 = os.path.getsize(latest_file)
+    time.sleep(0.3)
+    size2 = os.path.getsize(latest_file)
 
-    while True:
-
-        ret, frame = cap.read()
-
-        if not ret:
-            time.sleep(0.01)
-            continue
-
-        output = pipeline.process_frame(frame)
-
-        jpeg = pipeline.get_jpeg()
-
-        if jpeg is None:
-            continue
-
-        yield (
-            b"--frame\r\n"
-            b"Content-Type: image/jpeg\r\n\r\n" +
-            jpeg +
-            b"\r\n"
+    if size1 != size2:
+        raise HTTPException(
+            status_code=503,
+            detail="Camera recording still being written"
         )
 
+    return latest_file
 
-# =========================
-# STREAM ENDPOINT
-# =========================
-@router.get("/camera-stream")
-def camera_stream():
+
+# --------------------------------------------------
+# SET PROMPTS
+# --------------------------------------------------
+
+@router.post("/set-prompts")
+def set_prompts(data: dict):
+
+    prompts = data.get("prompts", [])
+
+    if isinstance(prompts, str):
+        prompts = [p.strip() for p in prompts.split(",")]
+
+    detector.set_prompts(prompts)
+
+    return {
+        "status": "ok",
+        "prompts": prompts
+    }
+
+
+# --------------------------------------------------
+# CAMERA STREAM (ANALYTICS PIPELINE)
+# --------------------------------------------------
+
+def generate_frames():
+
+    camera_path = get_latest_camera()
+
+    cap = cv2.VideoCapture(camera_path)
+
+    if not cap.isOpened():
+        raise HTTPException(status_code=500, detail="Unable to open camera file")
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+
+    frame_idx = 0
+    buffer_frames = []
+
+    try:
+
+        while True:
+
+            ret, frame = cap.read()
+
+            if not ret:
+                break
+
+            frame_idx += 1
+            buffer_frames.append(frame)
+
+            if len(buffer_frames) < BATCH_SIZE:
+                continue
+
+            for f in buffer_frames:
+
+                result = pipeline.process_frame(f, frame_idx)
+
+                drawn = result["frame"]
+                detections = result["detections"]
+                fps = result["fps"]
+                mode = result["mode"]
+
+                success, buffer = cv2.imencode(
+                    ".jpg",
+                    drawn,
+                    [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
+                )
+
+                if not success:
+                    continue
+
+                b64 = base64.b64encode(buffer.tobytes()).decode("utf-8")
+
+                progress = round((frame_idx / total_frames) * 100, 2)
+
+                yield json.dumps({
+                    "image": b64,
+                    "detections": detections,
+                    "fps": fps,
+                    "mode": mode,
+                    "progress": progress
+                }) + "\n"
+
+            buffer_frames = []
+
+    finally:
+        cap.release()
+
+    yield json.dumps({
+        "status": "done",
+        "progress": 100
+    }) + "\n"
+
+
+# --------------------------------------------------
+# CAMERA STREAM ENDPOINT
+# --------------------------------------------------
+
+@router.get("/camera")
+def stream_camera():
 
     return StreamingResponse(
         generate_frames(),
-        media_type="multipart/x-mixed-replace; boundary=frame",
+        media_type="text/plain",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
@@ -94,20 +180,40 @@ def camera_stream():
     )
 
 
-# =========================
-# PREVIEW
-# =========================
+# --------------------------------------------------
+# CAMERA PREVIEW ENDPOINT
+# --------------------------------------------------
+
 @router.get("/camera-preview")
 def camera_preview():
 
-    start_pipeline()
+    camera_path = get_latest_camera()
 
-    output = pipeline.get_latest_output()
+    cap = cv2.VideoCapture(camera_path)
 
-    if output is None:
-        return Response("WARMING UP...", media_type="text/plain")
+    if not cap.isOpened():
+        raise HTTPException(status_code=500, detail="Unable to open camera file")
 
-    return Response(
-        f"LIVE\nFPS: {output.get('fps', 0)}",
-        media_type="text/plain"
+    ret, frame = cap.read()
+    cap.release()
+
+    if not ret or frame is None:
+        raise HTTPException(status_code=500, detail="Unable to read frame")
+
+    success, buffer = cv2.imencode(
+        ".jpg",
+        frame,
+        [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY]
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail="JPEG encode failed")
+
+    return StreamingResponse(
+        iter([buffer.tobytes()]),
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"
+        }
     )
