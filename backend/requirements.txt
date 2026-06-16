@@ -40,7 +40,7 @@ picamera2>=0.3.22
 pyyaml==6.0.2
 loguru==0.7.2
 requests==2.32.3
-python-dotenv==1.0.1
+python-dotenv==1.2.2
 # aiofiles==24.1.0
 
 # =========================
@@ -81,7 +81,7 @@ python-dotenv==1.0.1
 # pyyaml==6.0.2
 # loguru==0.7.2
 # requests==2.32.3
-# python-dotenv==1.0.1
+# python-dotenv==1.2.2
 
 
 # # =========================
@@ -112,4 +112,4 @@ python-dotenv==1.0.1
 # pyyaml==6.0.2
 # loguru==0.7.2
 # requests==2.32.3
-# python-dotenv==1.0.1
+# python-dotenv==1.2.2
