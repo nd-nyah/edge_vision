@@ -1,6 +1,6 @@
 🧠 Edge Device Offline Video Analysis Platform
 Overview
-This project is a research-oriented edge AI system for offline video streaming and intelligent video analysis using AI models, agent-based reasoning, and prompt engineering. 
+This project is a research-oriented edge AI system for offline video streaming and intelligent video analysis using AI models, agent-based reasoning, and prompt engineering. 👉 **Demo Video:** [Watch here](assets/prompt_detection_demo.mp4)
 This platform is designed for testing and benchmarking computer vision models, with initial validation using Ultralytics YOLO for real-time object detection on video streams.
 
 🎯 Core Objectives
